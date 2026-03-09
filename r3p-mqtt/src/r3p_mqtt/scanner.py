@@ -38,9 +38,9 @@ async def discover_device(
     scanner = BleakScanner(detection_callback=on_detection)
     await scanner.start()
     try:
-        return await asyncio.wait_for(asyncio.shield(found), timeout=timeout)
-    except TimeoutError:
-        log.warning("BLE scan timed out after %.0fs", timeout)
+        return await asyncio.wait_for(found, timeout=timeout)
+    except (TimeoutError, asyncio.CancelledError):
+        log.warning("BLE scan stopped")
         return None
     finally:
         await scanner.stop()

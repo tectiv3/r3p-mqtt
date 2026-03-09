@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import signal
 import sys
 from pathlib import Path
 
@@ -13,18 +12,30 @@ from .scanner import discover_device
 log = logging.getLogger("r3p_mqtt")
 
 
+def log_device_status(device) -> None:
+    """Print current device status to log."""
+    from .mqtt import PUBLISH_FIELDS
+
+    values = []
+    for field_name in PUBLISH_FIELDS:
+        value = getattr(device, field_name, None)
+        if value is not None:
+            values.append(f"{field_name}={value}")
+    if values:
+        log.info("Device status: %s", ", ".join(values))
+
+
 async def run(config: Config) -> None:
     mqtt = MqttPublisher(config.mqtt)
-    await mqtt.connect()
-
-    shutdown = asyncio.Event()
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown.set)
+    try:
+        await mqtt.connect()
+    except Exception as e:
+        log.warning("MQTT unavailable (%s), running without MQTT", e)
+        mqtt = None
 
     backoff = 1.0
     try:
-        while not shutdown.is_set():
+        while True:
             log.info("Scanning for River 3 Plus...")
             result = await discover_device(
                 target_serial=config.device_serial,
@@ -32,12 +43,9 @@ async def run(config: Config) -> None:
             )
             if result is None:
                 log.warning("Device not found, retrying in %.0fs...", backoff)
-                try:
-                    await asyncio.wait_for(shutdown.wait(), timeout=backoff)
-                    break
-                except TimeoutError:
-                    backoff = min(backoff * 2, 60.0)
-                    continue
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
+                continue
 
             ble_dev, adv_data = result
             device = NewDevice(ble_dev, adv_data)
@@ -63,9 +71,10 @@ async def run(config: Config) -> None:
             device.on_disconnect(on_disconnect)
             device.on_connection_state_change(on_state_change)
 
-            # Register per-field callbacks for MQTT publishing
             def on_update():
-                asyncio.ensure_future(mqtt.publish_changed(device))
+                log_device_status(device)
+                if mqtt:
+                    asyncio.ensure_future(mqtt.publish_changed(device))
 
             device.register_callback(on_update)
 
@@ -73,15 +82,7 @@ async def run(config: Config) -> None:
                 await device.connect(user_id=config.user_id)
                 await device.wait_connected(timeout=30)
                 log.info("Authenticated with %s", device.serial_number)
-
-                # Wait until disconnect or shutdown
-                done, _ = await asyncio.wait(
-                    [
-                        asyncio.create_task(shutdown.wait()),
-                        asyncio.create_task(disconnected.wait()),
-                    ],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                await disconnected.wait()
             except Exception as e:
                 log.error("Connection failed: %s", e)
             finally:
@@ -90,14 +91,12 @@ async def run(config: Config) -> None:
                 except Exception:
                     pass
 
-            if not shutdown.is_set():
-                log.info("Reconnecting in %.0fs...", backoff)
-                try:
-                    await asyncio.wait_for(shutdown.wait(), timeout=backoff)
-                except TimeoutError:
-                    backoff = min(backoff * 2, 60.0)
+            log.info("Reconnecting in %.0fs...", backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
     finally:
-        await mqtt.disconnect()
+        if mqtt:
+            await mqtt.disconnect()
         log.info("Shutdown complete")
 
 
@@ -113,7 +112,10 @@ def main() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    asyncio.run(run(config))
+    try:
+        asyncio.run(run(config))
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
