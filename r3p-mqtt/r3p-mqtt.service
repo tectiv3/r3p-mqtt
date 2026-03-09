@@ -1,0 +1,15 @@
+[Unit]
+Description=EcoFlow River 3 Plus MQTT Bridge
+After=network-online.target bluetooth.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=r3pmqtt
+WorkingDirectory=/opt/r3p-mqtt
+ExecStart=/opt/r3p-mqtt/.venv/bin/r3p-mqtt
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

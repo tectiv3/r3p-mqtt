@@ -31,7 +31,7 @@ def log_device_status(device) -> None:
     if h == _last_status_hash:
         return
     _last_status_hash = h
-    log.info("Device status: %s", ", ".join(values))
+    log.debug("Device status: %s", ", ".join(values))
 
 
 async def run(config: Config) -> None:
