@@ -1,0 +1,6 @@
+This directory contains code derived from ha-ef-ble
+(https://github.com/rabits/ha-ef-ble) by rabits, licensed under the
+Apache License, Version 2.0. See LICENSE.apache2 for the full license text.
+
+Modifications: removed Home Assistant dependencies, reduced device support
+to River 3 / River 3 Plus only, simplified unsupported device handling.
