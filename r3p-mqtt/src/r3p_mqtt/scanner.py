@@ -39,8 +39,8 @@ async def discover_device(
     await scanner.start()
     try:
         return await asyncio.wait_for(found, timeout=timeout)
-    except (TimeoutError, asyncio.CancelledError):
-        log.warning("BLE scan stopped")
+    except TimeoutError:
+        log.warning("BLE scan timed out after %.0fs", timeout)
         return None
     finally:
         await scanner.stop()
