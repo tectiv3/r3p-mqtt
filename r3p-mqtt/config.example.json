@@ -1,0 +1,9 @@
+{
+  "user_id": "YOUR_ECOFLOW_USER_ID",
+  "device_serial": "YOUR_DEVICE_SERIAL",
+  "mqtt": {
+    "host": "localhost",
+    "port": 1883
+  },
+  "log_level": "INFO"
+}
