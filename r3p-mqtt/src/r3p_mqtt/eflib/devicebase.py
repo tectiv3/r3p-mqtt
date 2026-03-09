@@ -311,6 +311,11 @@ class DeviceBase(abc.ABC):
             for callback in self._callbacks_map.get(prop, set()):
                 callback()
 
+        # Call global (non-prop-specific) callbacks
+        if self._props_to_update:
+            for callback in self._callbacks:
+                callback()
+
         self._props_to_update.clear()
 
     def register_state_update_callback(

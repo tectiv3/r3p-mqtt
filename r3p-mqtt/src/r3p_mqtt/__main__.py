@@ -54,6 +54,7 @@ async def run(config: Config) -> None:
                 continue
 
             backoff = 1.0
+            device.with_update_period(int(config.publish_interval))
             log.info("Connecting to %s...", device.serial_number)
 
             disconnected = asyncio.Event()
