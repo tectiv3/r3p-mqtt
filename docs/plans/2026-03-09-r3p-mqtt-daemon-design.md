@@ -93,7 +93,7 @@ All published under `ecoflow/r3p/` with retain flag:
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `status` | string | online/offline (LWT) |
+| `online` | bool | true/false (LWT) |
 | `battery_level` | int | 0-100% |
 | `ac_input_power` | float | watts |
 | `ac_output_power` | float | watts |

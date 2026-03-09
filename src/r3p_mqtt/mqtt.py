@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 # Fields to publish and their types for JSON serialization
 PUBLISH_FIELDS = {
-    "battery_level": int,
+    "battery_level": float,
     "ac_input_power": float,
     "ac_output_power": float,
     "dc_input_power": float,
@@ -42,15 +42,15 @@ class MqttPublisher:
             username=self._config.username,
             password=self._config.password,
             will=aiomqtt.Will(
-                topic=f"{self._config.topic_prefix}/status",
-                payload="offline",
+                topic=f"{self._config.topic_prefix}/online",
+                payload="false",
                 retain=True,
             ),
         )
         await self._client.__aenter__()
         await self._client.publish(
-            f"{self._config.topic_prefix}/status",
-            payload="online",
+            f"{self._config.topic_prefix}/online",
+            payload="true",
             retain=True,
         )
         log.info("Connected to MQTT broker at %s:%d", self._config.host, self._config.port)
@@ -58,8 +58,8 @@ class MqttPublisher:
     async def disconnect(self) -> None:
         if self._client:
             await self._client.publish(
-                f"{self._config.topic_prefix}/status",
-                payload="offline",
+                f"{self._config.topic_prefix}/online",
+                payload="false",
                 retain=True,
             )
             await self._client.__aexit__(None, None, None)

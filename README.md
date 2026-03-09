@@ -58,8 +58,8 @@ All topics are under `ecoflow/r3p/` (configurable via `mqtt.topic_prefix`), reta
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `status` | string | `online` / `offline` (LWT) |
-| `battery_level` | int | Battery percentage |
+| `online` | bool | `true` / `false` (LWT) |
+| `battery_level` | float | Battery percentage |
 | `ac_input_power` | float | AC input power (W) |
 | `ac_output_power` | float | AC output power (W) |
 | `dc_input_power` | float | DC input power (W) |
