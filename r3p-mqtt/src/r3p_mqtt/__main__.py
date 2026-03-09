@@ -12,8 +12,12 @@ from .scanner import discover_device
 log = logging.getLogger("r3p_mqtt")
 
 
+_last_status_hash = None
+
+
 def log_device_status(device) -> None:
-    """Print current device status to log."""
+    """Print current device status to log, only when values change."""
+    global _last_status_hash
     from .mqtt import PUBLISH_FIELDS
 
     values = []
@@ -21,8 +25,13 @@ def log_device_status(device) -> None:
         value = getattr(device, field_name, None)
         if value is not None:
             values.append(f"{field_name}={value}")
-    if values:
-        log.info("Device status: %s", ", ".join(values))
+    if not values:
+        return
+    h = hash(tuple(values))
+    if h == _last_status_hash:
+        return
+    _last_status_hash = h
+    log.info("Device status: %s", ", ".join(values))
 
 
 async def run(config: Config) -> None:
