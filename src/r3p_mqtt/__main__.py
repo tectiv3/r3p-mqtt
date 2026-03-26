@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -53,7 +54,8 @@ async def disconnect_stale_bluez(target_address: str | None = None) -> None:
             if len(parts) < 3:
                 continue
             addr, name = parts[1], parts[2]
-            if not (addr == target_address or name.startswith("EF-")):
+            is_ecoflow = name.startswith(("EF-", "Ecoflow"))
+            if not (addr == target_address or is_ecoflow):
                 continue
             log.info("Cleaning up stale BlueZ connection: %s (%s)", name, addr)
             dc = await asyncio.create_subprocess_exec(
@@ -173,9 +175,11 @@ async def run(config: Config) -> None:
                 log.error("Connection failed: %s", e)
             finally:
                 try:
-                    await device.disconnect()
+                    await asyncio.wait_for(device.disconnect(), timeout=5)
                 except Exception:
                     pass
+                # Force-release at BlueZ level in case disconnect hung or failed
+                await disconnect_stale_bluez(last_known_address)
 
             log.info("Reconnecting in %.0fs...", backoff)
             await asyncio.sleep(backoff)
@@ -184,6 +188,22 @@ async def run(config: Config) -> None:
         if mqtt:
             await mqtt.disconnect()
         log.info("Shutdown complete")
+
+
+def _get_version() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 def main() -> None:
@@ -198,6 +218,8 @@ def main() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         stream=sys.stderr,
     )
+    version = _get_version()
+    log.info("r3p-mqtt starting (%s)", version)
     try:
         asyncio.run(run(config))
     except KeyboardInterrupt:
