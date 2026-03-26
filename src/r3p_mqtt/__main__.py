@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import subprocess
 import sys
@@ -15,8 +16,24 @@ log = logging.getLogger("r3p_mqtt")
 
 DATA_TIMEOUT = 60.0
 MQTT_RECONNECT_INTERVAL = 30.0
+STATE_FILE = Path("state.json")
 
 _last_status_hash = None
+
+
+def load_last_address() -> str | None:
+    try:
+        data = json.loads(STATE_FILE.read_text())
+        return data.get("last_address")
+    except Exception:
+        return None
+
+
+def save_last_address(address: str) -> None:
+    try:
+        STATE_FILE.write_text(json.dumps({"last_address": address}))
+    except Exception as e:
+        log.debug("Failed to save state: %s", e)
 
 
 def log_device_status(device) -> None:
@@ -84,7 +101,7 @@ async def connect_mqtt(config: Config) -> MqttPublisher | None:
 
 async def run(config: Config) -> None:
     mqtt = await connect_mqtt(config)
-    last_known_address: str | None = None
+    last_known_address = load_last_address()
 
     backoff = 1.0
     try:
@@ -104,6 +121,7 @@ async def run(config: Config) -> None:
 
             ble_dev, adv_data = result
             last_known_address = ble_dev.address
+            save_last_address(last_known_address)
             device = NewDevice(ble_dev, adv_data)
             if device is None:
                 log.error("Failed to create device instance")
