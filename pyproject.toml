@@ -1,7 +1,7 @@
 [project]
 name = "r3p-mqtt"
 version = "0.1.0"
-description = "Add your description here"
+description = "BLE-to-MQTT telemetry daemon for EcoFlow River 3 Plus"
 readme = "README.md"
 authors = [
     { name = "tectiv3", email = "git@getpanda.me" }

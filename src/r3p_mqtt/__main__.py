@@ -1,16 +1,19 @@
 import asyncio
 import logging
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config import Config
 from .eflib import NewDevice
 from .eflib.connection import ConnectionState
-from .mqtt import MqttPublisher
+from .mqtt import PUBLISH_FIELDS, MqttPublisher
 from .scanner import discover_device
 
 log = logging.getLogger("r3p_mqtt")
 
+DATA_TIMEOUT = 60.0
 
 _last_status_hash = None
 
@@ -18,8 +21,6 @@ _last_status_hash = None
 def log_device_status(device) -> None:
     """Print current device status to log, only when values change."""
     global _last_status_hash
-    from .mqtt import PUBLISH_FIELDS
-
     values = []
     for field_name in PUBLISH_FIELDS:
         value = getattr(device, field_name, None)
@@ -34,17 +35,54 @@ def log_device_status(device) -> None:
     log.debug("Device status: %s", ", ".join(values))
 
 
-async def run(config: Config) -> None:
+def disconnect_stale_bluez(target_address: str | None = None) -> None:
+    """Force-disconnect stale BlueZ connections to EcoFlow devices."""
+    if sys.platform != "linux":
+        return
+    try:
+        result = subprocess.run(
+            ["bluetoothctl", "devices", "Connected"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().splitlines():
+            parts = line.split(maxsplit=2)
+            if len(parts) < 3:
+                continue
+            addr, name = parts[1], parts[2]
+            if target_address and addr == target_address:
+                pass  # always disconnect target
+            elif not name.startswith("EF-"):
+                continue
+            log.info("Cleaning up stale BlueZ connection: %s (%s)", name, addr)
+            subprocess.run(
+                ["bluetoothctl", "disconnect", addr],
+                capture_output=True, timeout=5,
+            )
+    except FileNotFoundError:
+        log.debug("bluetoothctl not found, skipping stale connection cleanup")
+    except Exception as e:
+        log.debug("BlueZ cleanup failed: %s", e)
+
+
+async def connect_mqtt(config: Config) -> MqttPublisher | None:
     mqtt = MqttPublisher(config.mqtt)
     try:
         await mqtt.connect()
+        return mqtt
     except Exception as e:
         log.warning("MQTT unavailable (%s), running without MQTT", e)
-        mqtt = None
+        return None
+
+
+async def run(config: Config) -> None:
+    mqtt = await connect_mqtt(config)
+    last_known_address: str | None = None
 
     backoff = 1.0
     try:
         while True:
+            disconnect_stale_bluez(last_known_address)
+
             log.info("Scanning for River 3 Plus...")
             result = await discover_device(
                 target_serial=config.device_serial,
@@ -57,6 +95,7 @@ async def run(config: Config) -> None:
                 continue
 
             ble_dev, adv_data = result
+            last_known_address = ble_dev.address
             device = NewDevice(ble_dev, adv_data)
             if device is None:
                 log.error("Failed to create device instance")
@@ -67,6 +106,7 @@ async def run(config: Config) -> None:
             log.info("Connecting to %s...", device.serial_number)
 
             disconnected = asyncio.Event()
+            last_data_time = time.monotonic()
 
             def on_disconnect(exc=None):
                 if exc:
@@ -82,17 +122,39 @@ async def run(config: Config) -> None:
             device.on_connection_state_change(on_state_change)
 
             def on_update():
+                nonlocal last_data_time
+                last_data_time = time.monotonic()
                 log_device_status(device)
-                if mqtt:
-                    asyncio.ensure_future(mqtt.publish_changed(device))
+                if mqtt and mqtt.is_connected:
+                    asyncio.create_task(mqtt.publish_changed(device))
 
             device.register_callback(on_update)
+
+            async def watchdog():
+                """Detect silent BLE death and force reconnect."""
+                while not disconnected.is_set():
+                    await asyncio.sleep(DATA_TIMEOUT / 2)
+                    silence = time.monotonic() - last_data_time
+                    if silence > DATA_TIMEOUT:
+                        log.warning(
+                            "No BLE data for %.0fs, forcing reconnect", silence,
+                        )
+                        disconnected.set()
+                        return
 
             try:
                 await device.connect(user_id=config.user_id)
                 await device.wait_connected(timeout=30)
                 log.info("Authenticated with %s", device.serial_number)
-                await disconnected.wait()
+
+                if mqtt is None:
+                    mqtt = await connect_mqtt(config)
+
+                watchdog_task = asyncio.create_task(watchdog())
+                try:
+                    await disconnected.wait()
+                finally:
+                    watchdog_task.cancel()
             except Exception as e:
                 log.error("Connection failed: %s", e)
             finally:

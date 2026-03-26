@@ -35,6 +35,10 @@ class MqttPublisher:
         self._client: aiomqtt.Client | None = None
         self._last_values: dict[str, object] = {}
 
+    @property
+    def is_connected(self) -> bool:
+        return self._client is not None
+
     async def connect(self) -> None:
         self._client = aiomqtt.Client(
             hostname=self._config.host,
@@ -69,22 +73,26 @@ class MqttPublisher:
         """Publish only fields that changed since last call."""
         if not self._client:
             return
-        for field_name, field_type in PUBLISH_FIELDS.items():
-            value = getattr(device, field_name, None)
-            if value is None:
-                continue
-            if field_name in self._last_values and self._last_values[field_name] == value:
-                continue
-            self._last_values[field_name] = value
-            topic = f"{self._config.topic_prefix}/{field_name}"
-            if field_type is bool:
-                payload = "true" if value else "false"
-            elif field_type is float:
-                payload = f"{value:.2f}"
-            else:
-                payload = str(value)
-            await self._client.publish(topic, payload=payload, retain=True)
-            log.debug("Published %s = %s", topic, payload)
+        try:
+            for field_name, field_type in PUBLISH_FIELDS.items():
+                value = getattr(device, field_name, None)
+                if value is None:
+                    continue
+                if field_name in self._last_values and self._last_values[field_name] == value:
+                    continue
+                self._last_values[field_name] = value
+                topic = f"{self._config.topic_prefix}/{field_name}"
+                if field_type is bool:
+                    payload = "true" if value else "false"
+                elif field_type is float:
+                    payload = f"{value:.2f}"
+                else:
+                    payload = str(value)
+                await self._client.publish(topic, payload=payload, retain=True)
+                log.debug("Published %s = %s", topic, payload)
+        except Exception as e:
+            log.warning("MQTT publish failed (%s), marking disconnected", e)
+            self._client = None
 
     async def publish_fault(self, fault_data: dict) -> None:
         """Publish fault event."""

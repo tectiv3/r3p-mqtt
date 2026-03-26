@@ -17,7 +17,7 @@ async def discover_device(
     timeout: float = 30.0,
 ) -> tuple[BLEDevice, AdvertisementData] | None:
     """Scan for EcoFlow River 3 Plus device."""
-    found: asyncio.Future[tuple[BLEDevice, AdvertisementData]] = asyncio.get_event_loop().create_future()
+    found: asyncio.Future[tuple[BLEDevice, AdvertisementData]] = asyncio.get_running_loop().create_future()
 
     def on_detection(device: BLEDevice, adv_data: AdvertisementData) -> None:
         if found.done():
