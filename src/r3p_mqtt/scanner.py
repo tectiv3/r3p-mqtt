@@ -5,7 +5,7 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
-from .eflib import NewDevice, sn_from_advertisement, DeviceBase
+from .eflib import sn_from_advertisement
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +17,8 @@ async def discover_device(
     timeout: float = 30.0,
 ) -> tuple[BLEDevice, AdvertisementData] | None:
     """Scan for EcoFlow River 3 Plus device."""
-    found: asyncio.Future[tuple[BLEDevice, AdvertisementData]] = asyncio.get_running_loop().create_future()
+    loop = asyncio.get_running_loop()
+    found: asyncio.Future[tuple[BLEDevice, AdvertisementData]] = loop.create_future()
 
     def on_detection(device: BLEDevice, adv_data: AdvertisementData) -> None:
         if found.done():

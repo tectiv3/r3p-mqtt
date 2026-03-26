@@ -2,8 +2,7 @@ from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
 from .devicebase import DeviceBase
-from .devices import devices
-from .devices import unsupported
+from .devices import devices, unsupported
 
 __all__ = ["DeviceBase", "NewDevice", "sn_from_advertisement"]
 

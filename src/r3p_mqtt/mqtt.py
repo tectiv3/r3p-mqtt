@@ -57,17 +57,34 @@ class MqttPublisher:
             payload="true",
             retain=True,
         )
-        log.info("Connected to MQTT broker at %s:%d", self._config.host, self._config.port)
+        log.info(
+            "Connected to MQTT broker at %s:%d",
+            self._config.host,
+            self._config.port,
+        )
 
     async def disconnect(self) -> None:
-        if self._client:
+        if not self._client:
+            return
+        try:
             await self._client.publish(
                 f"{self._config.topic_prefix}/online",
                 payload="false",
                 retain=True,
             )
-            await self._client.__aexit__(None, None, None)
-            self._client = None
+        except Exception:
+            pass
+        await self._cleanup_client()
+
+    async def _cleanup_client(self) -> None:
+        if not self._client:
+            return
+        client = self._client
+        self._client = None
+        try:
+            await client.__aexit__(None, None, None)
+        except Exception:
+            pass
 
     async def publish_changed(self, device) -> None:
         """Publish only fields that changed since last call."""
@@ -78,7 +95,7 @@ class MqttPublisher:
                 value = getattr(device, field_name, None)
                 if value is None:
                     continue
-                if field_name in self._last_values and self._last_values[field_name] == value:
+                if self._last_values.get(field_name) == value:
                     continue
                 self._last_values[field_name] = value
                 topic = f"{self._config.topic_prefix}/{field_name}"
@@ -91,13 +108,17 @@ class MqttPublisher:
                 await self._client.publish(topic, payload=payload, retain=True)
                 log.debug("Published %s = %s", topic, payload)
         except Exception as e:
-            log.warning("MQTT publish failed (%s), marking disconnected", e)
-            self._client = None
+            log.warning("MQTT publish failed (%s), cleaning up", e)
+            await self._cleanup_client()
 
     async def publish_fault(self, fault_data: dict) -> None:
         """Publish fault event."""
         if not self._client:
             return
-        topic = f"{self._config.topic_prefix}/fault"
-        await self._client.publish(topic, payload=json.dumps(fault_data))
-        log.warning("Published fault: %s", fault_data)
+        try:
+            topic = f"{self._config.topic_prefix}/fault"
+            await self._client.publish(topic, payload=json.dumps(fault_data))
+            log.warning("Published fault: %s", fault_data)
+        except Exception as e:
+            log.warning("MQTT fault publish failed (%s), cleaning up", e)
+            await self._cleanup_client()

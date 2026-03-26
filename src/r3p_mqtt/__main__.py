@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -14,6 +13,7 @@ from .scanner import discover_device
 log = logging.getLogger("r3p_mqtt")
 
 DATA_TIMEOUT = 60.0
+MQTT_RECONNECT_INTERVAL = 30.0
 
 _last_status_hash = None
 
@@ -35,29 +35,35 @@ def log_device_status(device) -> None:
     log.debug("Device status: %s", ", ".join(values))
 
 
-def disconnect_stale_bluez(target_address: str | None = None) -> None:
+async def disconnect_stale_bluez(target_address: str | None = None) -> None:
     """Force-disconnect stale BlueZ connections to EcoFlow devices."""
     if sys.platform != "linux":
         return
     try:
-        result = subprocess.run(
-            ["bluetoothctl", "devices", "Connected"],
-            capture_output=True, text=True, timeout=5,
+        proc = await asyncio.create_subprocess_exec(
+            "bluetoothctl",
+            "devices",
+            "Connected",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        for line in result.stdout.strip().splitlines():
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        for line in stdout.decode().strip().splitlines():
             parts = line.split(maxsplit=2)
             if len(parts) < 3:
                 continue
             addr, name = parts[1], parts[2]
-            if target_address and addr == target_address:
-                pass  # always disconnect target
-            elif not name.startswith("EF-"):
+            if not (addr == target_address or name.startswith("EF-")):
                 continue
             log.info("Cleaning up stale BlueZ connection: %s (%s)", name, addr)
-            subprocess.run(
-                ["bluetoothctl", "disconnect", addr],
-                capture_output=True, timeout=5,
+            dc = await asyncio.create_subprocess_exec(
+                "bluetoothctl",
+                "disconnect",
+                addr,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            await asyncio.wait_for(dc.communicate(), timeout=5)
     except FileNotFoundError:
         log.debug("bluetoothctl not found, skipping stale connection cleanup")
     except Exception as e:
@@ -81,7 +87,7 @@ async def run(config: Config) -> None:
     backoff = 1.0
     try:
         while True:
-            disconnect_stale_bluez(last_known_address)
+            await disconnect_stale_bluez(last_known_address)
 
             log.info("Scanning for River 3 Plus...")
             result = await discover_device(
@@ -132,15 +138,23 @@ async def run(config: Config) -> None:
 
             async def watchdog():
                 """Detect silent BLE death and force reconnect."""
+                nonlocal mqtt
                 while not disconnected.is_set():
                     await asyncio.sleep(DATA_TIMEOUT / 2)
                     silence = time.monotonic() - last_data_time
                     if silence > DATA_TIMEOUT:
                         log.warning(
-                            "No BLE data for %.0fs, forcing reconnect", silence,
+                            "No BLE data for %.0fs, forcing reconnect",
+                            silence,
                         )
                         disconnected.set()
                         return
+                    # Reconnect MQTT if it dropped during a stable BLE session
+                    if mqtt is not None and not mqtt.is_connected:
+                        log.info("MQTT disconnected, attempting reconnect...")
+                        mqtt = await connect_mqtt(config)
+                    elif mqtt is None:
+                        mqtt = await connect_mqtt(config)
 
             try:
                 await device.connect(user_id=config.user_id)
